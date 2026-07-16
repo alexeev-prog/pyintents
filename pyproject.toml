@@ -6,7 +6,7 @@ readme = "README.md"
 authors = [
     { name = "Alexeev Bronislav", email = "alexeev.dev@mail.ru" }
 ]
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 dependencies = [
     "asyncio>=4.0.0",
     "furo>=2025.12.19",
