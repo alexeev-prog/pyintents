@@ -1,6 +1,6 @@
-.. nadzoring documentation master file
+.. pyintents documentation master file
 
-Welcome to Nadzoring's documentation!
+Welcome to pyintents's documentation!
 ======================================
 
 PyIntents brings capability-based security to Python. Functions declare what they are allowed to do via @intent decorators, and the runtime enforces these permissions at call time. Define namespaces with allow and disallow rules, propagate restrictions recursively, or selectively exempt trusted functions with without. Permissions are dynamic and layered — grant or revoke access at runtime without touching the original code. Ideal for plugin sandboxes, AI agent tool control, environment-specific security policies, and testing. Trust explicitly, fail safely. No more functions that quietly do whatever they want.
@@ -19,10 +19,10 @@ Versions
    * - Version
      - Description
      - Status
-   * - `main </nadzoring/main/>`_
+   * - `main </pyintents/main/>`_
      - Latest development version from the main branch
      - **Latest**
-   * - `v0.1.0 </nadzoring/v0.1.0/>`_
+   * - `v0.1.0 </pyintents/v0.1.0/>`_
      - Initial public release
      - Legacy
 
