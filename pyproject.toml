@@ -1,0 +1,27 @@
+[project]
+name = "pyintents"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Alexeev Bronislav", email = "alexeev.dev@mail.ru" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "asyncio>=4.0.0",
+    "furo>=2025.12.19",
+    "git-cliff>=2.13.1",
+    "mutmut>=3.6.0",
+    "mypy>=2.3.0",
+    "nox>=2026.7.11",
+    "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
+    "pytest-mock>=3.15.1",
+    "pytest-sugar>=1.1.1",
+    "ruff>=0.15.21",
+    "sphinx>=9.1.0",
+]
+
+[build-system]
+requires = ["uv_build>=0.10.12,<0.11.0"]
+build-backend = "uv_build"
