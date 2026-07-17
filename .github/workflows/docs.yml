@@ -15,35 +15,34 @@ jobs:
       id-token: write
       contents: read
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
-        fetch-tags: true
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          fetch-tags: true
 
-    - name: Set up Python
-      uses: actions/setup-python@v6
-      with:
-        python-version: '3.12'
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
 
-    - name: Install dependencies
-      run: |
-        pip install sphinx furo sphinx-polyversion
-        pip install aiohttp click dnspython elevate geopy netifaces pandas ping3 pysocks python-dateutil python-whois "requests[socks]" scapy tabulate tqdm
-        pip install -e .
+      - name: Install dependencies
+        run: |
+          pip install sphinx furo sphinx-polyversion asyncio
+          pip install -e .
 
-    - name: Build versioned docs
-      run: |
-        sphinx-polyversion docs/poly.py
+      - name: Build versioned docs
+        run: |
+          sphinx-polyversion docs/poly.py
 
-        touch docs/_build/html/.nojekyll
-        echo '<meta http-equiv="refresh" content="0; url=main/">' > docs/_build/html/index.html
+          touch docs/_build/html/.nojekyll
+          echo '<meta http-equiv="refresh" content="0; url=main/">' > docs/_build/html/index.html
 
-    - name: Upload pages artifact
-      uses: actions/upload-pages-artifact@v5
-      with:
-        path: docs/_build/html
+      - name: Upload pages artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: docs/_build/html
 
-    - name: Deploy to GitHub Pages
-      id: deployment
-      uses: actions/deploy-pages@v5
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
