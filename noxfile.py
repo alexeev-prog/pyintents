@@ -18,8 +18,6 @@ def test(session):
         "-s",
         "--tb=short",
         "--strict-markers",
-        "-n",
-        "auto",
         *session.posargs,
     )
 
