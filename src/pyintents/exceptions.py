@@ -3,3 +3,10 @@ class IntentViolationError(Exception):
         self.func_name = func_name
         self.violation = violation
         super().__init__(f"Function '{func_name}' calls forbidden '{violation}'")
+
+
+class IntentParseError(Exception):
+    def __init__(self, func_name: str, message: str) -> None:
+        self.func_name = func_name
+        self.message = message
+        super().__init__(f"Function '{func_name}' cannot be parsed: {message}")

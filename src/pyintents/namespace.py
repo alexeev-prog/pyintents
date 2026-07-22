@@ -2,7 +2,7 @@
 from functools import wraps
 from typing import Callable, Optional
 
-from pyintents.exceptions import IntentViolationError
+from pyintents.exceptions import IntentParseError, IntentViolationError
 from pyintents.introspect import CallNode, CallTree
 
 
@@ -65,8 +65,8 @@ class IntentNamespace:
                         use_locals,
                         func,
                     )
-                except (SyntaxError, IndentationError):
-                    pass
+                except (SyntaxError, IndentationError) as e:
+                    raise IntentParseError(func.__name__, f"cannot parse: {e}")
                 return func(*args, **kwargs)
 
             return wrapper
@@ -110,7 +110,7 @@ class IntentNamespace:
             if short_name in without_names or node.name in without_names:
                 return
 
-            if not self._is_call_allowed(node, allowed_names, use_locals, root_func):
+            if not self._is_call_allowed(node, allowed_names, use_locals):
                 parent_name = node.parent.name if node.parent else "unknown"
                 raise IntentViolationError(
                     func_name=parent_name,
@@ -141,11 +141,7 @@ class IntentNamespace:
         return False
 
     def _is_call_allowed(
-        self,
-        node: CallNode,
-        allowed_names: set[str],
-        use_locals: bool,
-        root_func: Callable,
+        self, node: CallNode, allowed_names: set[str], use_locals: bool
     ) -> bool:
         if use_locals and node.is_local:
             return True
