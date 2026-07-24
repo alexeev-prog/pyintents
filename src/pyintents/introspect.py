@@ -1,172 +1,521 @@
-# introspect.py
+"""AST introspection and call graph construction for PyIntents."""
+
+from __future__ import annotations
+
 import ast
 import builtins
 import inspect
+import textwrap
+import types
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
-from typing import Callable, Optional
+from typing import Any
+
+from pyintents.exceptions import IntentParseError
+
+__all__ = [
+    "CallLocation",
+    "CallNode",
+    "CallTree",
+    "SafeResolver",
+    "get_calls",
+    "get_function_identity",
+]
 
 
-def get_calls(func: Callable) -> list[str]:
-    try:
-        source = inspect.getsource(func)
-    except (OSError, TypeError):
-        return []
+FunctionDefLike = ast.FunctionDef | ast.AsyncFunctionDef
 
-    try:
-        tree = ast.parse(source)
-    except (SyntaxError, IndentationError):
-        return []
 
-    calls = []
+def get_function_identity(func: Callable[..., Any]) -> str:
+    """Return a stable textual identity for a callable."""
+    module = getattr(func, "__module__", None) or "<unknown>"
+    qualname = getattr(func, "__qualname__", None)
 
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
+    if not qualname:
+        qualname = getattr(func, "__name__", repr(func))
 
-        func_node = node.func
-        while isinstance(func_node, ast.Call):
-            func_node = func_node.func
+    return f"{module}:{qualname}"
 
-        if isinstance(func_node, ast.Name):
-            calls.append(func_node.id)
-        elif isinstance(func_node, ast.Attribute):
-            parts = []
-            current = func_node
-            while isinstance(current, ast.Attribute):
-                parts.append(current.attr)
-                current = current.value  # type: ignore
-            if isinstance(current, ast.Name):
-                parts.append(current.id)
-            calls.append(".".join(reversed(parts)))
 
-    return calls
+@dataclass(frozen=True)
+class CallLocation:
+    """A single call site discovered in AST."""
+
+    target: str
+    short_name: str
+    lineno: int
+    col_offset: int
+    is_dynamic: bool = False
 
 
 @dataclass
 class CallNode:
-    name: str
-    calls: list["CallNode"] = field(default_factory=list)
-    parent: Optional["CallNode"] = None
-    source: Optional[str] = None
-    resolved_func: Optional[Callable] = None
-    is_local: bool = False
+    """Node in a call graph."""
 
-    def __repr__(self, level: int = 0) -> str:
-        indent = "  " * level
-        result = f"{indent}└─ {self.name}\n"
-        for child in self.calls:
-            result += child.__repr__(level + 1)
-        return result
+    identity: str
+    call_name: str
+    lineno: int | None = None
+    col_offset: int | None = None
+    resolved_func: Callable[..., Any] | None = None
+    is_local_definition: bool = False
+    is_dynamic: bool = False
+    is_unresolved: bool = False
+    is_source_available: bool = True
+    is_cycle: bool = False
+    children: list[CallNode] = field(default_factory=list)
 
-    def __eq__(self, other: object) -> bool:
-        if not isinstance(other, CallNode):
-            return False
-        return self.name == other.name and self.parent == other.parent
+    def walk(self) -> Iterator[CallNode]:
+        """Yield this node and all descendants."""
+        yield self
+
+        for child in self.children:
+            yield from child.walk()
 
 
-class CallTree:
-    def __init__(self, func: Callable, max_depth: int = 1):
-        self.max_depth: int = max(0, max_depth)
-        self._visited: dict[str, CallNode] = {}
-        self._call_stack: set[str] = set()
-        self.root = self._build_node(func, current_depth=0, parent=None)
+def _get_function_ast(func: Callable[..., Any]) -> FunctionDefLike:
+    """Parse source code of a callable and return its AST definition."""
+    func_name = getattr(
+        func,
+        "__qualname__",
+        getattr(func, "__name__", repr(func)),
+    )
 
-    def _build_node(
-        self, func: Callable, current_depth: int, parent: Optional[CallNode]
-    ) -> CallNode:
-        name = getattr(func, "__qualname__", getattr(func, "__name__", str(func)))
+    try:
+        source = inspect.getsource(func)
+    except (OSError, TypeError) as exc:
+        raise IntentParseError(
+            func_name,
+            "source code is not available",
+        ) from exc
 
-        if name in self._call_stack:
-            return CallNode(name=name, parent=parent, resolved_func=func)
+    try:
+        module = ast.parse(textwrap.dedent(source))
+    except (SyntaxError, IndentationError) as exc:
+        raise IntentParseError(
+            func_name,
+            f"invalid source: {exc}",
+        ) from exc
 
-        if name in self._visited:
-            return self._visited[name]
+    target_name = getattr(func, "__name__", None)
 
-        node = CallNode(name=name, parent=parent, resolved_func=func)
+    for node in module.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if target_name is None or node.name == target_name:
+                return node
 
-        try:
-            node.source = inspect.getsource(func)
-        except (OSError, TypeError):
-            pass
+    for node in ast.walk(module):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if target_name is None or node.name == target_name:
+                return node
 
-        self._visited[name] = node
-        self._call_stack.add(name)
+    raise IntentParseError(
+        func_name,
+        "function definition was not found in source",
+    )
 
-        if current_depth >= self.max_depth:
-            self._call_stack.remove(name)
-            return node
 
-        called_names = get_calls(func)
+def _format_target(node: ast.expr) -> tuple[str, bool]:
+    """
+    Convert AST call target to a textual representation.
 
-        for called_name in called_names:
-            child_func = self._resolve_function(called_name, func)
-            if child_func:
-                child_node = self._build_node(child_func, current_depth + 1, node)
-                if "." in called_name:
-                    child_node.name = called_name
-                child_node.is_local = self._is_local_function(called_name, func)
-                node.calls.append(child_node)
+    Returns:
+        (target_name, is_dynamic)
+    """
+    if isinstance(node, ast.Name):
+        return node.id, False
+
+    if isinstance(node, ast.Attribute):
+        base, dynamic = _format_target(node.value)
+
+        if dynamic:
+            return f"<dynamic>.{node.attr}", True
+
+        return f"{base}.{node.attr}", False
+
+    if isinstance(node, ast.Call):
+        return "<call-result>", True
+
+    if isinstance(node, ast.Subscript):
+        return "<subscript>", True
+
+    return "<dynamic>", True
+
+
+class _OuterCallCollector(ast.NodeVisitor):
+    """
+    Collect calls from the executable body of one function.
+
+    This collector intentionally does not descend into nested function
+    bodies, lambda bodies, or method bodies. Nested function definitions
+    are recorded separately so they can be analyzed only when called.
+    """
+
+    def __init__(self) -> None:
+        self.calls: list[CallLocation] = []
+        self.local_functions: dict[str, FunctionDefLike] = {}
+
+    def visit_Call(self, node: ast.Call) -> None:
+        target, is_dynamic = _format_target(node.func)
+        short_name = target.rsplit(".", maxsplit=1)[-1]
+
+        self.calls.append(
+            CallLocation(
+                target=target,
+                short_name=short_name,
+                lineno=node.lineno,
+                col_offset=node.col_offset,
+                is_dynamic=is_dynamic,
+            )
+        )
+
+        # Immediately invoked lambda:
+        #
+        #     (lambda: foo())()
+        #
+        # Its body executes in the current scope, so analyze it.
+        if isinstance(node.func, ast.Lambda):
+            self.visit(node.func.body)
+
+        self.generic_visit(node)
+
+    def visit_FunctionDef(self, node: FunctionDefLike) -> None:
+        # Directly nested function definition.
+        # Record it, but do not analyze its body as part of outer function.
+        self.local_functions[node.name] = node
+        self._visit_function_definition_creation(node)
+
+    visit_AsyncFunctionDef = visit_FunctionDef
+
+    def visit_Lambda(self, node: ast.Lambda) -> None:
+        # Lambda body is executed when called, not when defined.
+        # Immediate lambda calls are handled in visit_Call.
+        self._visit_arguments(node.args)
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        # Class body executes at definition time.
+        # We visit class-level expressions, but skip method bodies.
+        for decorator in node.decorator_list:
+            self.visit(decorator)
+
+        for base in node.bases:
+            self.visit(base)
+
+        for keyword in node.keywords:
+            self.visit(keyword.value)
+
+        for statement in node.body:
+            if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                self._visit_function_definition_creation(statement)
+            elif isinstance(statement, ast.ClassDef):
+                self.visit(statement)
             else:
-                child_node = CallNode(name=called_name, parent=node)
-                child_node.is_local = self._is_local_function(called_name, func)
-                node.calls.append(child_node)
+                self.visit(statement)
 
-        self._call_stack.remove(name)
-        return node
+    def _visit_function_definition_creation(
+        self,
+        node: FunctionDefLike,
+    ) -> None:
+        # Decorators and default arguments are evaluated when the function
+        # object is created, so they belong to the enclosing execution scope.
+        for decorator in node.decorator_list:
+            self.visit(decorator)
 
-    def _resolve_function(self, name: str, parent_func: Callable) -> Optional[Callable]:
+        self._visit_arguments(node.args)
+
+    def _visit_arguments(self, args: ast.arguments) -> None:
+        all_args = [*args.posonlyargs, *args.args, *args.kwonlyargs]
+
+        for arg in all_args:
+            if arg.annotation is not None:
+                self.visit(arg.annotation)
+
+        if args.vararg is not None and args.vararg.annotation is not None:
+            self.visit(args.vararg.annotation)
+
+        if args.kwarg is not None and args.kwarg.annotation is not None:
+            self.visit(args.kwarg.annotation)
+
+        for default in args.defaults:
+            self.visit(default)
+
+        for default in args.kw_defaults:
+            if default is not None:
+                self.visit(default)
+
+
+def extract_calls_from_function_def(
+    func_def: FunctionDefLike,
+) -> tuple[list[CallLocation], dict[str, FunctionDefLike]]:
+    """Extract call sites and local function definitions from AST."""
+    collector = _OuterCallCollector()
+
+    for statement in func_def.body:
+        collector.visit(statement)
+
+    return collector.calls, collector.local_functions
+
+
+def get_calls(func: Callable[..., Any]) -> list[str]:
+    """
+    Compatibility helper.
+
+    Returns call target names from the outer function body.
+    Raises IntentParseError when source is unavailable or invalid.
+    """
+    func_def = _get_function_ast(func)
+    calls, _ = extract_calls_from_function_def(func_def)
+    return [call.target for call in calls]
+
+
+class SafeResolver:
+    """
+    Resolve dotted names without executing arbitrary descriptors.
+
+    This resolver intentionally avoids:
+    - inspect.stack()
+    - getattr() on arbitrary instances
+    - resolution through mutable local variables
+    """
+
+    def resolve(
+        self,
+        name: str,
+        parent_func: Callable[..., Any] | None,
+    ) -> Callable[..., Any] | None:
+        if parent_func is None:
+            return None
+
+        if not name or name.startswith("<"):
+            return None
+
+        parts = name.split(".")
+
         try:
             parent_globals = parent_func.__globals__
         except AttributeError:
             return None
 
-        parts = name.split(".")
         obj = parent_globals.get(parts[0])
 
         if obj is None:
             obj = getattr(builtins, parts[0], None)
 
         if obj is None:
-            for frame in inspect.stack():
-                if frame.function == "<module>":
-                    obj = frame.frame.f_globals.get(parts[0])
-                    if obj is not None:
-                        break
-
-        if obj is None:
             return None
 
         for part in parts[1:]:
+            # Follow only modules and classes.
+            # This avoids triggering instance properties/descriptors.
+            if not isinstance(obj, (types.ModuleType, type)):
+                return None
+
+            obj = inspect.getattr_static(obj, part, None)
+
             if obj is None:
                 return None
-            obj = getattr(obj, part, None)
 
         return obj if callable(obj) else None
 
-    def _is_local_function(self, name: str, parent_func: Callable) -> bool:
-        try:
-            parent_globals = parent_func.__globals__
-            return name in parent_globals and callable(parent_globals.get(name))
-        except AttributeError:
-            return False
 
-    def has_call(self, func_name: str) -> bool:
-        return self._search_call(self.root, func_name)
+class CallTree:
+    """
+    Build a call graph for a function.
 
-    def _search_call(self, node: CallNode, func_name: str) -> bool:
-        if node.name == func_name or func_name in node.name:
-            return True
-        return any(self._search_call(child, func_name) for child in node.calls)
+    Root function must have source code available.
+    Child functions without source are represented as opaque nodes.
+    """
 
-    def find_calls(self, func_name: str) -> list[CallNode]:
-        result: list[CallNode] = []
-        self._find_calls_recursive(self.root, func_name, result)
-        return result
-
-    def _find_calls_recursive(
-        self, node: CallNode, func_name: str, result: list[CallNode]
+    def __init__(
+        self,
+        func: Callable[..., Any],
+        max_depth: int | float = 1,
+        resolver: SafeResolver | None = None,
     ) -> None:
-        if func_name in node.name:
-            result.append(node)
-        for child in node.calls:
-            self._find_calls_recursive(child, func_name, result)
+        self.max_depth: int | float = max(0, max_depth)
+        self.resolver = resolver or SafeResolver()
+        self.root = self._build_from_callable(
+            func=func,
+            depth=0,
+            stack=frozenset(),
+            require_source=True,
+        )
+
+    def has_call(self, name: str) -> bool:
+        """Check whether call graph contains exact call name or identity."""
+        return any(
+            name == node.call_name or name == node.identity for node in self.root.walk()
+        )
+
+    def find_calls(self, name: str) -> list[CallNode]:
+        """Find nodes by exact call name or identity."""
+        return [
+            node
+            for node in self.root.walk()
+            if name == node.call_name or name == node.identity
+        ]
+
+    def _build_from_callable(
+        self,
+        func: Callable[..., Any],
+        depth: int,
+        stack: frozenset[str],
+        require_source: bool,
+    ) -> CallNode:
+        identity = get_function_identity(func)
+        call_name = getattr(
+            func,
+            "__qualname__",
+            getattr(func, "__name__", identity),
+        )
+
+        node = CallNode(
+            identity=identity,
+            call_name=call_name,
+            resolved_func=func,
+        )
+
+        if identity in stack:
+            node.is_cycle = True
+            return node
+
+        if depth >= self.max_depth:
+            return node
+
+        try:
+            func_def = _get_function_ast(func)
+        except IntentParseError:
+            if require_source:
+                raise
+
+            node.is_source_available = False
+            return node
+
+        node.is_source_available = True
+
+        return self._expand_node(
+            node=node,
+            func_def=func_def,
+            depth=depth,
+            stack=stack,
+            parent_func=func,
+            local_defs={},
+        )
+
+    def _build_from_ast(
+        self,
+        func_def: FunctionDefLike,
+        name: str,
+        depth: int,
+        stack: frozenset[str],
+        parent_func: Callable[..., Any] | None,
+        local_defs: dict[str, FunctionDefLike],
+        owner_identity: str,
+    ) -> CallNode:
+        identity = f"local:{owner_identity}:{name}"
+
+        node = CallNode(
+            identity=identity,
+            call_name=name,
+            lineno=func_def.lineno,
+            col_offset=func_def.col_offset,
+            is_local_definition=True,
+            is_source_available=True,
+        )
+
+        if identity in stack:
+            node.is_cycle = True
+            return node
+
+        if depth >= self.max_depth:
+            return node
+
+        return self._expand_node(
+            node=node,
+            func_def=func_def,
+            depth=depth,
+            stack=stack,
+            parent_func=parent_func,
+            local_defs=local_defs,
+        )
+
+    def _expand_node(
+        self,
+        node: CallNode,
+        func_def: FunctionDefLike,
+        depth: int,
+        stack: frozenset[str],
+        parent_func: Callable[..., Any] | None,
+        local_defs: dict[str, FunctionDefLike],
+    ) -> CallNode:
+        calls, own_locals = extract_calls_from_function_def(func_def)
+        merged_locals = {**local_defs, **own_locals}
+        child_stack = stack | {node.identity}
+
+        for call in calls:
+            child = self._build_child(
+                call=call,
+                parent_func=parent_func,
+                local_defs=merged_locals,
+                depth=depth + 1,
+                stack=child_stack,
+                owner_identity=node.identity,
+            )
+            node.children.append(child)
+
+        return node
+
+    def _build_child(
+        self,
+        call: CallLocation,
+        parent_func: Callable[..., Any] | None,
+        local_defs: dict[str, FunctionDefLike],
+        depth: int,
+        stack: frozenset[str],
+        owner_identity: str,
+    ) -> CallNode:
+        local_def: FunctionDefLike | None = None
+
+        if not call.is_dynamic and "." not in call.target:
+            local_def = local_defs.get(call.target)
+
+        if local_def is not None:
+            child = self._build_from_ast(
+                func_def=local_def,
+                name=call.target,
+                depth=depth,
+                stack=stack,
+                parent_func=parent_func,
+                local_defs=local_defs,
+                owner_identity=owner_identity,
+            )
+        else:
+            resolved = (
+                None
+                if call.is_dynamic
+                else self.resolver.resolve(call.target, parent_func)
+            )
+
+            if resolved is not None:
+                child = self._build_from_callable(
+                    func=resolved,
+                    depth=depth,
+                    stack=stack,
+                    require_source=False,
+                )
+            else:
+                child = CallNode(
+                    identity=f"unresolved:{call.target}",
+                    call_name=call.target,
+                    is_unresolved=True,
+                    is_dynamic=call.is_dynamic,
+                    is_source_available=False,
+                )
+
+        child.call_name = call.target
+        child.lineno = call.lineno
+        child.col_offset = call.col_offset
+
+        if call.is_dynamic:
+            child.is_dynamic = True
+
+        return child
