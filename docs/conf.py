@@ -18,8 +18,8 @@ load(globals())
 
 project = "pyintents"
 author = "Alexeev Bronislav"
-version = "0.1.0"
-release = "0.1"
+version = "0.2.0"
+release = "0.2"
 project_copyright = "2025, Alexeev Bronislav"
 
 GITHUB_USER = "alexeev-prog"
@@ -55,18 +55,6 @@ pygments_style = "gruvbox-dark"
 html_theme = "furo"
 html_static_path: list[str] = ["_static"]
 
-html_js_files: list[tuple[str, dict[str, str]]] = [
-    (
-        "https://context7.com/widget.js",
-        {
-            "data-library": "/alexeev-prog/pyintents",
-            "data-color": "#059669",
-            "data-position": "bottom-right",
-            "data-placeholder": "Ask about pyintents...",
-            "async": "async",
-        },
-    ),
-]
 todo_include_todos = True
 auto_doc_default_options: dict[str, bool] = {"autosummary": True}
 

@@ -2,7 +2,7 @@
   <p align="center">
     <h1>pyintents</h1>
     <p><strong>Declarative capability-based access control for Python functions.</strong></p>
-    <a href="https://alexeev-prog.github.io/pyintents/v0.2.2"><strong>Explore the docs »</strong></a>
+    <a href="https://alexeev-prog.github.io/pyintents/v0.2.0"><strong>Explore the docs »</strong></a>
   </p>
   <p align="center">
     <a href="#-getting-started">Getting Started</a>
@@ -44,7 +44,21 @@
 
 ## 📖 Overview
 
-PyIntents brings **capability-based security** to Python. Functions declare what they are allowed to do via `@intent` decorators, and the runtime enforces these permissions at call time. Define namespaces with allow and disallow rules, propagate restrictions recursively, or selectively exempt trusted functions with `without`. Permissions are dynamic and layered — grant or revoke access at runtime without touching the original code. Ideal for plugin sandboxes, AI agent tool control, environment-specific security policies, and testing. Trust explicitly, fail safely. No more functions that quietly do whatever they want.
+**PyIntents** brings capability-based security to Python.
+
+Functions declare what they are allowed to do through an `@intent` decorator, and PyIntents enforces these permissions at call time. You define namespaces with allow and deny rules, recursively validate call chains, exempt trusted helpers when needed, and keep unknown or dynamic behavior blocked by default.
+
+PyIntents is useful for:
+
+- plugin sandboxes;
+- AI agent tool control;
+- environment-specific security policies;
+- testing and dependency isolation;
+- security audits and explicit capability boundaries.
+
+> **Trust explicitly. Fail safely.**
+
+PyIntents is not a full operating-system-level sandbox. It is a declarative policy layer for Python functions. For strong isolation of untrusted code, combine it with process isolation, containers, WASM, or a dedicated sandboxing solution.
 
 ---
 
@@ -56,23 +70,33 @@ PyIntents brings **capability-based security** to Python. Functions declare what
 pip install pyintents
 ```
 
+Python 3.12+ is recommended.
+
+---
+
 ### Quick Example
 
 ```python
 from pyintents import IntentNamespace
 
-# Create a namespace that allows only print()
+# Allow only print()
 namespace = IntentNamespace(uses=[print])
+
 
 @namespace.intent()
 def safe_function():
-    print("This is allowed")  # ✅
+    print("This is allowed")  # OK
+
 
 @namespace.intent()
 def unsafe_function():
     import os
-    os.system("rm -rf /")  # ❌ Raises IntentViolationError
+    os.system("echo bad")  # IntentViolationError
 ```
+
+By default, PyIntents validates the function **before execution**.
+
+If a forbidden or unknown call is found anywhere in the statically visible call chain, the decorated function is not executed.
 
 ---
 
@@ -81,7 +105,10 @@ def unsafe_function():
 ### 1. Allow Specific Functions
 
 ```python
+from pyintents import IntentNamespace
+
 namespace = IntentNamespace(uses=[print, len])
+
 
 @namespace.intent()
 def my_func():
@@ -89,70 +116,203 @@ def my_func():
     return len([1])  # Allowed
 ```
 
+---
+
 ### 2. Recursive Enforcement
 
+Recursive validation is enabled by default.
+
 ```python
-namespace = IntentNamespace(uses=[print], recursive=True)
+namespace = IntentNamespace(uses=[print])
+
 
 def helper():
     print("Inside helper")
 
-@namespace.intent()
+
+@namespace.intent(uses=[helper])
 def main():
-    helper()  # Recursively validated
+    helper()
 ```
 
-### 3. Exempt Trusted Functions
+PyIntents checks not only `main`, but also what `helper` calls.
+
+---
+
+### 3. Allow Functions From the Same Module
+
+If your module has many internal helper functions, allowing each one manually can be tedious.
+
+Use `usemodule=True`:
 
 ```python
 namespace = IntentNamespace(
-    uses=[print, helper],
-    without=[helper]  # Exempt from checks
+    uses=[print],
+    recursive=True,
+    usemodule=True,
 )
+
+
+def inner():
+    print("Inner")
+
+
+def outer():
+    print("Outer")
+    inner()
+
+
+@namespace.intent()
+def func():
+    outer()
+```
+
+With `usemodule=True`:
+
+- functions defined in the same module as the decorated function are allowed;
+- their calls are still recursively validated;
+- functions from other modules are not automatically allowed.
+
+`usemodule` requires `recursive=True`.
+
+---
+
+### 4. Allow Local Nested Functions
+
+`uselocals=True` allows functions defined inside the decorated function.
+
+```python
+namespace = IntentNamespace(
+    uses=[print],
+    uselocals=True,
+)
+
 
 @namespace.intent()
 def main():
-    helper()  # Called without validation
-    print("OK")
+    def local_helper():
+        print("Local helper")
+
+    local_helper()
 ```
 
-### 4. Runtime Layering
+Important:
+
+- `uselocals=True` allows nested local functions;
+- it does **not** automatically allow module-level global functions.
+
+For module-level helpers, use `usemodule=True` or explicit `uses=[...]`.
+
+---
+
+### 5. Exempt Trusted Functions From Allowlist Checks
+
+`without` exempts a function from allowlist checks, but deny rules are still enforced.
+
+```python
+def helper():
+    print("OK")
+
+
+namespace = IntentNamespace(
+    uses=[print],
+    without=[helper],
+)
+
+
+@namespace.intent()
+def main():
+    helper()
+```
+
+Important:
+
+`without` does not mean “ignore everything inside this function forever”.
+
+It means:
+
+- this function does not need to be explicitly allowed by `uses`;
+- but forbidden calls inside it can still be rejected.
+
+---
+
+### 6. Explicit Denial
+
+```python
+import os
+
+from pyintents import IntentNamespace
+
+namespace = IntentNamespace(
+    uses=[print],
+    deny=[os.system],
+)
+
+
+@namespace.intent()
+def restricted():
+    print("OK")
+    os.system("echo bad")  # Explicitly denied
+```
+
+You can also use string rules:
+
+```python
+namespace = IntentNamespace(
+    uses=[print],
+    deny=["os.system"],
+)
+```
+
+---
+
+### 7. Runtime Layering
+
+Decorator-level rules extend or override namespace-level rules.
 
 ```python
 base = IntentNamespace(uses=[print])
 
-@base.intent(uses=[len])  # Adds len to permissions
+
+@base.intent(uses=[len])
 def layered_func():
     print("Hi")
     return len("world")
 ```
 
-### 5. Explicit Denial
+---
+
+### 8. Unknown and Dynamic Calls Are Blocked by Default
+
+PyIntents is fail-closed by default.
+
+Unknown calls are denied unless explicitly allowed or unless `allow_unknown=True` is set.
+
+Dynamic primitives such as:
 
 ```python
-namespace = IntentNamespace(
-    uses=[print],
-    deny=[os.system]
-)
-
-@namespace.intent()
-def restricted():
-    print("OK")
-    os.system("echo bad")  # ❌ Explicitly denied
+eval
+exec
+compile
+__import__
+getattr
+setattr
+delattr
+globals
+locals
+vars
+breakpoint
 ```
 
-### 6. Local Functions
+are denied by default.
+
+You can disable this behavior with:
 
 ```python
-namespace = IntentNamespace(uses=[print])
-
-def local_helper():
-    pass
-
-@namespace.intent(uselocals=True)
-def main():
-    local_helper()  # Allowed (local scope)
+IntentNamespace(deny_dynamic_primitives=False)
 ```
+
+but this is discouraged.
 
 ---
 
@@ -160,25 +320,46 @@ def main():
 
 ### `IntentNamespace`
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `uses` | `list[Callable]` | Allowed functions |
-| `recursive` | `bool` | Enable recursive validation (default: `False`) |
-| `without` | `list[Callable]` | Exempt functions from validation |
-| `uselocals` | `bool` | Allow local functions (default: `False`) |
-| `deny` | `list[Callable]` | Explicitly forbidden functions |
+```python
+IntentNamespace(
+    uses=None,
+    *,
+    recursive=True,
+    without=None,
+    uselocals=False,
+    usemodule=False,
+    deny=None,
+    allow_unknown=False,
+    deny_dynamic_primitives=True,
+)
+```
 
-### `@intent()` Decorator
+| Parameter | Type | Default | Description |
+|---|---|---:|---|
+| `uses` | `Iterable[Callable or str]` | `None` | Explicitly allowed functions or names |
+| `recursive` | `bool` | `True` | Recursively validate called functions |
+| `without` | `Iterable[Callable or str]` | `None` | Exempt from allowlist checks only |
+| `uselocals` | `bool` | `False` | Allow nested functions defined inside the decorated function |
+| `usemodule` | `bool` | `False` | Allow functions from the same module. Requires `recursive=True` |
+| `deny` | `Iterable[Callable or str]` | `None` | Explicitly forbidden functions or names |
+| `allow_unknown` | `bool` | `False` | Allow unresolved or opaque calls |
+| `deny_dynamic_primitives` | `bool` | `True` | Deny dynamic primitives like `eval`, `exec`, `getattr`, etc. |
 
-Overrides namespace settings per function:
+---
+
+### `@namespace.intent()`
+
+Overrides or extends namespace settings per function.
 
 ```python
 @namespace.intent(
-    uses=[print],           # Override allowed functions
-    recursive=True,         # Override recursion
-    without=[helper],       # Override exemptions
-    uselocals=True,         # Override local scope
-    deny=[os.system]        # Override denials
+    uses=[print],
+    recursive=True,
+    without=[helper],
+    uselocals=True,
+    usemodule=True,
+    deny=[os.system],
+    allow_unknown=False,
 )
 def custom_func():
     pass
@@ -190,62 +371,158 @@ def custom_func():
 
 ### `IntentViolationError`
 
-Raised when a function violates declared permissions:
+Raised when a function violates declared permissions.
 
 ```python
-from pyintents.exceptions import IntentViolationError
+from pyintents import IntentNamespace, IntentViolationError
+
+namespace = IntentNamespace(uses=[print])
+
+
+@namespace.intent()
+def bad():
+    import os
+    os.system("echo bad")
+
 
 try:
-    func()
-except IntentViolationError as e:
-    print(e)  # Function 'func' calls forbidden 'os.system'
+    bad()
+except IntentViolationError as exc:
+    print(exc)
+```
+
+---
+
+### `IntentParseError`
+
+Raised when function source code is unavailable or cannot be parsed.
+
+```python
+from pyintents.exceptions import IntentParseError
+```
+
+---
+
+### `IntentConfigurationError`
+
+Raised when namespace or decorator configuration is invalid.
+
+```python
+from pyintents.exceptions import IntentConfigurationError
 ```
 
 ---
 
 ## 🔧 How It Works
 
-1. **AST Parsing** — PyIntents parses the function's source code using Python's `ast` module
-2. **Call Tree Construction** — Builds a tree of all function calls up to the specified depth
-3. **Permission Resolution** — Resolves call names to actual function objects
-4. **Rule Matching** — Validates each call against:
-   - `uses` — allowed functions
-   - `deny` — explicitly forbidden functions
-   - `without` — exempt functions
-   - `uselocals` — local scope exceptions
-5. **Runtime Enforcement** — Validates at call time, raising `IntentViolationError` on violations
+PyIntents performs static policy validation before the decorated function is executed.
 
-### Limitations
+The pipeline is:
 
-- **Source Code Required** — Functions must have source code available (not built-ins or C extensions)
-- **Dynamic Calls** — Calls via `getattr()` or `eval()` cannot be statically analyzed
-- **Depth Limit** — Recursion depth is capped to prevent infinite loops
+1. **AST Parsing**
+   PyIntents parses the function source code using Python's `ast` module.
+
+2. **Call Graph Construction**
+   It builds a tree of statically visible function calls.
+
+3. **Safe Resolution**
+   Call names are resolved to actual function objects when possible.
+
+4. **Rule Matching**
+   Each call is validated against:
+   - `uses`;
+   - `deny`;
+   - `without`;
+   - `uselocals`;
+   - `usemodule`;
+   - unknown-call policy;
+   - dynamic-primitive policy.
+
+5. **Pre-Execution Enforcement**
+   If a violation is found, the decorated function is not executed.
+
+Example:
+
+```text
+func -> outer -> inner -> os.system
+```
+
+If `os.system` is forbidden or unknown, PyIntents blocks the root call to `func` before any code inside `func` runs.
+
+---
+
+## 🧠 Security Model
+
+PyIntents follows a fail-closed model.
+
+By default:
+
+- only explicitly allowed calls are permitted;
+- recursive validation is enabled;
+- unknown calls are denied;
+- dynamic primitives are denied;
+- functions without available source code are treated carefully;
+- violations prevent execution.
+
+### Pre-Execution Validation
+
+PyIntents validates the call chain before execution.
+
+This means:
+
+```python
+@namespace.intent()
+def func():
+    print("Func")
+    outer()
+```
+
+If `outer` eventually calls something forbidden, `func` will not execute at all.
+
+This is intentional.
+
+It prevents partially executed functions from producing side effects before a violation is detected.
+
+---
+
+## ⚠️ Limitations
+
+PyIntents is a static and runtime policy layer, not a complete sandbox.
+
+Python is highly dynamic, so some behavior cannot be fully analyzed statically.
+
+Examples:
+
+```python
+getattr(os, "system")("echo bad")
+eval("os.system('echo bad')")
+globals()["os"].system("echo bad")
+```
+
+PyIntents mitigates many of these cases by denying dynamic primitives by default, but no AST-only solution can guarantee complete isolation.
+
+For strong security boundaries, use:
+
+- subprocesses;
+- containers;
+- seccomp;
+- WASM;
+- RestrictedPython;
+- custom import hooks;
+- runtime monitoring.
 
 ---
 
 ## 🎯 Use Cases
 
 | Use Case | Description |
-|----------|-------------|
-| **Plugin Sandboxes** | Restrict what third-party plugins can do |
-| **AI Agent Control** | Limit tool access for LLM agents |
-| **Environment Policies** | Enforce different rules per environment (dev/staging/prod) |
-| **Testing** | Isolate unit tests from external dependencies |
-| **Security Audits** | Document and enforce capability boundaries |
-
----
-
-## 📄 License
-
-Licensed under the **GNU General Public License v3.0**.
-
-See [LICENSE](https://github.com/alexeev-prog/pyintents/blob/main/LICENSE) for details.
-
----
-
-## 🤝 Contributing
-
-Contributions are welcome! Feel free to open issues, submit PRs, or suggest features.
+|---|---|
+| Plugin Sandboxes | Restrict what third-party plugins can do |
+| AI Agent Control | Limit tool access for LLM agents |
+| Environment Policies | Enforce different rules per environment |
+| Testing | Isolate unit tests from external dependencies |
+| Security Audits | Document and enforce capability boundaries |
+| Internal APIs | Prevent accidental access to dangerous helpers |
 
 ---
 
@@ -257,16 +534,36 @@ Contributions are welcome! Feel free to open issues, submit PRs, or suggest feat
 
 ---
 
+## 📄 License
+
+Licensed under the GNU General Public License v3.0.
+
+See [LICENSE](https://github.com/alexeev-prog/pyintents/blob/main/LICENSE) for details.
+
+---
+
+## 🤝 Contributing
+
+Contributions are welcome.
+
+Feel free to:
+
+- open issues;
+- submit pull requests;
+- suggest features;
+- improve documentation;
+- report security concerns.
+
+---
+
 ## 🌟 Support
 
 If you find PyIntents useful, consider:
 
-- ⭐ Starring the repository on GitHub
-- 🐛 Reporting issues
-- 💡 Suggesting features
-- 📖 Improving documentation
-
----
+- ⭐ starring the repository on GitHub;
+- 🐛 reporting issues;
+- 💡 suggesting features;
+- 📖 improving documentation.
 
 <p align="center">
   <i>Trust explicitly. Fail safely.</i>
