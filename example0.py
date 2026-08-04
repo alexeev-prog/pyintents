@@ -10,7 +10,7 @@ main_namespace = IntentNamespace(
 
 
 def inner() -> None:
-    os.system("echo Inner")
+    os.system("rm test.txt")
 
 
 def outer() -> None:
