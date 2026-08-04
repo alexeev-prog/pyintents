@@ -22,6 +22,8 @@ Versions
    * - `main </pyintents/main/>`_
      - Latest development version from the main branch
      - **Latest**
+   * - `v0.2.0 </pyintents/v0.2.0/>`_
+     - Improve security and stability, add new features, and fix bugs
    * - `v0.1.0 </pyintents/v0.1.0/>`_
      - Initial public release
      - Legacy
