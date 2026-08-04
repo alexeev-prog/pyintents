@@ -7,12 +7,11 @@ pyintents — Declarative capability-based access control for Python functions.
    :maxdepth: 2
    :caption: Содержание:
 
-   modules
    installation
    usage
    api/modules
 
-Indexes and tables
+Индексы и таблицы
 ==================
 
 * :ref:`genindex`
