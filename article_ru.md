@@ -123,3 +123,54 @@ def unsafe():
 
 ## introspect.py
 Сердце библиотеки — модуль introspect.py. Он отвечает за парсинг исходного кода и извлечение информации о вызовах. Вся магия начинается с _get_function_ast — функции, которая получает AST функции.
+
+Вот как выглядит этот процесс в _get_function_ast:
+
+```python
+def _get_function_ast(func: Callable[..., Any]) -> FunctionDefLike:
+    """Parse source code of a callable and return its AST definition."""
+    func_name = getattr(
+        func,
+        "__qualname__",
+        getattr(func, "__name__", repr(func)),
+    )
+
+    try:
+        source = inspect.getsource(func)
+    except (OSError, TypeError) as exc:
+        raise IntentParseError(
+            func_name,
+            "source code is not available",
+        ) from exc
+
+    try:
+        module = ast.parse(textwrap.dedent(source))
+    except (SyntaxError, IndentationError) as exc:
+        raise IntentParseError(
+            func_name,
+            f"invalid source: {exc}",
+        ) from exc
+
+    target_name = getattr(func, "__name__", None)
+
+    for node in module.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if target_name is None or node.name == target_name:
+                return node
+
+    for node in ast.walk(module):  # type: ignore
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if target_name is None or node.name == target_name:
+                return node
+
+    raise IntentParseError(
+        func_name,
+        "function definition was not found in source",
+    )
+```
+
+Функция пытается найти определение в теле модуля, а если не находит — обходит всё дерево целиком. Это нужно для случаев, когда функция определена внутри условных конструкций или классов. Если исходный код недоступен (например, это встроенная функция len или C-расширение), мы выбрасываем IntentParseError.
+
+
+
+_OuterCallCollector: как мы собираем вызовы
