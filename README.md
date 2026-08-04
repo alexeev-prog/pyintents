@@ -2,7 +2,7 @@
   <p align="center">
     <h1>pyintents</h1>
     <p><strong>Declarative capability-based access control for Python functions.</strong></p>
-    <a href="https://alexeev-prog.github.io/pyintents/v0.2.0"><strong>Explore the docs »</strong></a>
+    <a href="https://alexeev-prog.github.io/pyintents/index.html"><strong>Explore the docs »</strong></a>
   </p>
   <p align="center">
     <a href="#-getting-started">Getting Started</a>
