@@ -103,7 +103,7 @@ def _get_function_ast(func: Callable[..., Any]) -> FunctionDefLike:
             if target_name is None or node.name == target_name:
                 return node
 
-    for node in ast.walk(module):
+    for node in ast.walk(module):  # type: ignore
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             if target_name is None or node.name == target_name:
                 return node
@@ -238,7 +238,7 @@ class _OuterCallCollector(ast.NodeVisitor):
         for default in args.defaults:
             self.visit(default)
 
-        for default in args.kw_defaults:
+        for default in args.kw_defaults:  # type: ignore
             if default is not None:
                 self.visit(default)
 

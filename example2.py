@@ -1,5 +1,4 @@
 """Example with safe local nested functions."""
-
 from pyintents import IntentNamespace, IntentViolationError
 
 namespace = IntentNamespace(
