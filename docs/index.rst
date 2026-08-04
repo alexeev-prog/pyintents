@@ -1,17 +1,15 @@
-Документация pyintents
-======================
+PyIntents documentation
+=======================
 
-pyintents — Declarative capability-based access control for Python functions.
+Declarative capability-based access control for Python functions.
 
 .. toctree::
    :maxdepth: 2
-   :caption: Содержание:
+   :caption: Contents:
 
-   installation
-   usage
-   api/modules
+   modules
 
-Индексы и таблицы
+Indices and tables
 ==================
 
 * :ref:`genindex`

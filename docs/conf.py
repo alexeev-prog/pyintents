@@ -39,7 +39,6 @@ intersphinx_mapping = {
     "typing": ("https://docs.python.org/3/library/typing.html", None),
 }
 
-pygments_style = "gruvbox-dark"
 html_theme = "furo"
 html_static_path = ["_static"]
 todo_include_todos = True
@@ -49,6 +48,7 @@ autodoc_default_options = {
     "undoc-members": True,
     "private-members": True,
     "special-members": "__init__",
+    "show-inheritance": True,
 }
 
 autodoc_inherit_docstrings = True
@@ -61,6 +61,8 @@ autosummary_imported_members = True
 
 add_module_names = True
 add_function_parentheses = True
+
+pygments_style = "gruvbox-dark"
 
 
 def skip(app, what, name, obj, would_skip, options):
