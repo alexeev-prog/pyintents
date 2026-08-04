@@ -2,7 +2,7 @@ name: docs
 
 on:
   push:
-    branches: [main]
+    branches: [main] # branch to trigger deployment
 
 jobs:
   pages:
@@ -13,36 +13,18 @@ jobs:
     permissions:
       pages: write
       id-token: write
-      contents: read
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-          fetch-tags: true
+        uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
       - name: Install dependencies
         run: |
-          pip install sphinx furo sphinx-polyversion asyncio
-          pip install -e .
+          pip install sphinx furo
 
-      - name: Build versioned docs
-        run: |
-          sphinx-polyversion docs/poly.py
-
-          touch docs/_build/html/.nojekyll
-          echo '<meta http-equiv="refresh" content="0; url=main/">' > docs/_build/html/index.html
-
-      - name: Upload pages artifact
-        uses: actions/upload-pages-artifact@v5
-        with:
-          path: docs/_build/html
-
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v5
+      - id: deployment
+        uses: sphinx-notes/pages@v3
