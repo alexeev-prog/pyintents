@@ -14,6 +14,13 @@ class IntentError(Exception):
     """Base class for all PyIntents errors."""
 
 
+class IntentShadowingError(IntentError):
+    """Raised when a protected name is shadowed in the local scope."""
+
+    def __init__(self, desc: str) -> None:
+        super().__init__(f"Protected name shadowing error: {desc}")
+
+
 class IntentViolationError(IntentError):
     """Raised when a function violates declared capabilities."""
 

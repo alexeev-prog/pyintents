@@ -11,7 +11,7 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from typing import Any
 
-from pyintents.exceptions import IntentParseError
+from pyintents.exceptions import IntentParseError, IntentShadowingError
 
 __all__ = [
     "CallLocation",
@@ -141,18 +141,99 @@ def _format_target(node: ast.expr) -> tuple[str, bool]:
     return "<dynamic>", True
 
 
+# class ImportVisitor(ast.NodeVisitor):
+#     def __init__(self, protected_names: set[str]):
+#         self.protected_names = protected_names
+
+#         self.protected_short_names = {p.rsplit(".", 1)[-1] for p in protected_names}
+
+#     def visit_Import(self, node: ast.Import):
+#         for alias in node.names:
+#             name = alias.asname or alias.name
+#             if name in self.protected_short_names:
+#                 conflicts = [
+#                     p for p in self.protected_names if p.rsplit(".", 1)[-1] == name
+#                 ]
+#                 raise IntentShadowingError(
+#                     f"Forbidden import: '{alias.name}' imported as '{name}' "
+#                     f"shadows protected name(s): {', '.join(conflicts)}"
+#                 )
+
+#     def visit_ImportFrom(self, node: ast.ImportFrom):
+#         for alias in node.names:
+#             name = alias.asname or alias.name
+#             if name in self.protected_short_names:
+#                 conflicts = [
+#                     p for p in self.protected_names if p.rsplit(".", 1)[-1] == name
+#                 ]
+#                 source = f"{node.module}." if node.module else ""
+#                 raise IntentShadowingError(
+#                     f"Forbidden import: '{source}{alias.name}' imported as '{name}' "
+#                     f"shadows protected name(s): {', '.join(conflicts)}"
+#                 )
+
+
 class _OuterCallCollector(ast.NodeVisitor):
-    """
-    Collect calls from the executable body of one function.
-
-    This collector intentionally does not descend into nested function
-    bodies, lambda bodies, or method bodies. Nested function definitions
-    are recorded separately so they can be analyzed only when called.
-    """
-
-    def __init__(self) -> None:
+    def __init__(self, protected_names: set[str] | None = None) -> None:
         self.calls: list[CallLocation] = []
         self.local_functions: dict[str, FunctionDefLike] = {}
+        self.protected_names: set[str] = protected_names or set()
+
+    def _check_shadowing(self, node: ast.AST) -> None:
+        protected_short_names = {p.rsplit(".", 1)[-1] for p in self.protected_names}
+
+        if isinstance(node, ast.Name):
+            if node.id in protected_short_names:
+                conflicts = [
+                    p for p in self.protected_names if p.rsplit(".", 1)[-1] == node.id
+                ]
+                raise IntentShadowingError(
+                    f"Assignment to '{node.id}' is forbidden. It shadows: {', '.join(conflicts)}"
+                )
+
+    def visit_Import(self, node: ast.Import):
+        protected_short_names = {p.rsplit(".", 1)[-1] for p in self.protected_names}
+        for alias in node.names:
+            name = alias.asname or alias.name
+            if name in protected_short_names:
+                conflicts = [
+                    p for p in self.protected_names if p.rsplit(".", 1)[-1] == name
+                ]
+                raise IntentShadowingError(
+                    f"Forbidden import: '{alias.name}' imported as '{name}' "
+                    f"shadows protected name(s): {', '.join(conflicts)}"
+                )
+
+    def visit_ImportFrom(self, node: ast.ImportFrom):
+        protected_short_names = {p.rsplit(".", 1)[-1] for p in self.protected_names}
+        for alias in node.names:
+            name = alias.asname or alias.name
+            if name in protected_short_names:
+                conflicts = [
+                    p for p in self.protected_names if p.rsplit(".", 1)[-1] == name
+                ]
+                source = f"{node.module}." if node.module else ""
+                raise IntentShadowingError(
+                    f"Forbidden import: '{source}{alias.name}' imported as '{name}' "
+                    f"shadows protected name(s): {', '.join(conflicts)}"
+                )
+
+    def visit_Assign(self, node: ast.Assign) -> None:
+        for target in node.targets:
+            if isinstance(target, ast.Name):
+                self._check_shadowing(target)
+            elif isinstance(target, (ast.Tuple, ast.List)):
+                for elt in target.elts:
+                    self._check_shadowing(elt)
+        self.generic_visit(node)
+
+    def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
+        self._check_shadowing(node.target)
+        self.generic_visit(node)
+
+    def visit_AugAssign(self, node: ast.AugAssign) -> None:
+        self._check_shadowing(node.target)
+        self.generic_visit(node)
 
     def visit_Call(self, node: ast.Call) -> None:
         target, is_dynamic = _format_target(node.func)
@@ -168,32 +249,21 @@ class _OuterCallCollector(ast.NodeVisitor):
             )
         )
 
-        # Immediately invoked lambda:
-        #
-        #     (lambda: foo())()
-        #
-        # Its body executes in the current scope, so analyze it.
         if isinstance(node.func, ast.Lambda):
             self.visit(node.func.body)
 
         self.generic_visit(node)
 
     def visit_FunctionDef(self, node: FunctionDefLike) -> None:
-        # Directly nested function definition.
-        # Record it, but do not analyze its body as part of outer function.
         self.local_functions[node.name] = node
         self._visit_function_definition_creation(node)
 
     visit_AsyncFunctionDef = visit_FunctionDef
 
     def visit_Lambda(self, node: ast.Lambda) -> None:
-        # Lambda body is executed when called, not when defined.
-        # Immediate lambda calls are handled in visit_Call.
         self._visit_arguments(node.args)
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
-        # Class body executes at definition time.
-        # We visit class-level expressions, but skip method bodies.
         for decorator in node.decorator_list:
             self.visit(decorator)
 
@@ -215,8 +285,6 @@ class _OuterCallCollector(ast.NodeVisitor):
         self,
         node: FunctionDefLike,
     ) -> None:
-        # Decorators and default arguments are evaluated when the function
-        # object is created, so they belong to the enclosing execution scope.
         for decorator in node.decorator_list:
             self.visit(decorator)
 
@@ -245,9 +313,9 @@ class _OuterCallCollector(ast.NodeVisitor):
 
 def extract_calls_from_function_def(
     func_def: FunctionDefLike,
+    protected_names: set[str] | None = None,
 ) -> tuple[list[CallLocation], dict[str, FunctionDefLike]]:
-    """Extract call sites and local function definitions from AST."""
-    collector = _OuterCallCollector()
+    collector = _OuterCallCollector(protected_names=protected_names or set())
 
     for statement in func_def.body:
         collector.visit(statement)
@@ -255,7 +323,9 @@ def extract_calls_from_function_def(
     return collector.calls, collector.local_functions
 
 
-def get_calls(func: Callable[..., Any]) -> list[str]:
+def get_calls(
+    func: Callable[..., Any], protected_names: set[str] | None = None
+) -> list[str]:
     """
     Compatibility helper.
 
@@ -263,7 +333,9 @@ def get_calls(func: Callable[..., Any]) -> list[str]:
     Raises IntentParseError when source is unavailable or invalid.
     """
     func_def = _get_function_ast(func)
-    calls, _ = extract_calls_from_function_def(func_def)
+    calls, _ = extract_calls_from_function_def(
+        func_def, protected_names=protected_names
+    )
     return [call.target for call in calls]
 
 
@@ -304,8 +376,6 @@ class SafeResolver:
             return None
 
         for part in parts[1:]:
-            # Follow only modules and classes.
-            # This avoids triggering instance properties/descriptors.
             if not isinstance(obj, (types.ModuleType, type)):
                 return None
 
@@ -330,9 +400,11 @@ class CallTree:
         func: Callable[..., Any],
         max_depth: int | float = 1,
         resolver: SafeResolver | None = None,
+        protected_names: set[str] | None = None,
     ) -> None:
         self.max_depth: int | float = max(0, max_depth)
         self.resolver = resolver or SafeResolver()
+        self.protected_names = protected_names or set()
         self.root = self._build_from_callable(
             func=func,
             depth=0,
@@ -447,7 +519,9 @@ class CallTree:
         parent_func: Callable[..., Any] | None,
         local_defs: dict[str, FunctionDefLike],
     ) -> CallNode:
-        calls, own_locals = extract_calls_from_function_def(func_def)
+        calls, own_locals = extract_calls_from_function_def(
+            func_def, protected_names=self.protected_names
+        )
         merged_locals = {**local_defs, **own_locals}
         child_stack = stack | {node.identity}
 

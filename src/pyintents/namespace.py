@@ -304,7 +304,13 @@ class IntentNamespace:
         ) -> Callable[..., Any]:
             @wraps(func)
             def wrapper(*args: Any, **kwargs: Any) -> Any:
-                tree = CallTree(func, max_depth=max_depth)
+                protected_names: set[str] = set(
+                    merged_uses.names | merged_uses.short_names
+                )
+
+                tree = CallTree(
+                    func, max_depth=max_depth, protected_names=protected_names
+                )
                 root_module = getattr(func, "__module__", None)
 
                 self._validate_tree(
