@@ -348,7 +348,7 @@ class IntentNamespace:
                     else:
                         raise IntentViolationError(
                             func_name=path[-1],
-                            violation=node.call_name,
+                            violation=f"{node.call_name} (identity: {node.identity})",
                             path=path[:-1],
                         )
 
@@ -367,7 +367,7 @@ class IntentNamespace:
                         else:
                             raise IntentViolationError(
                                 func_name=path[-1],
-                                violation=node.call_name,
+                                violation=f"{node.call_name} (identity: {node.identity})",
                                 path=path[:-1],
                             )
 

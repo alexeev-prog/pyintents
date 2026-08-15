@@ -1234,7 +1234,7 @@ def test_recursive_true_expands_children_and_denies_eval():
     with pytest.raises(IntentViolationError) as exc:
         decorated()
 
-    assert exc.value.violation == "eval"
+    assert exc.value.violation.split(" ")[0] == "eval"
 
 
 def test_direct_violation_attributes():
@@ -1245,7 +1245,7 @@ def test_direct_violation_attributes():
         decorated()
 
     assert exc.value.func_name == "calls_helper"
-    assert exc.value.violation == "helper_allowed"
+    assert exc.value.violation.split(" ")[0] == "helper_allowed"
     assert exc.value.path == ()
 
 
@@ -1256,7 +1256,7 @@ def test_nested_violation_path_and_attributes():
     with pytest.raises(IntentViolationError) as exc:
         decorated()
 
-    assert exc.value.violation == "eval"
+    assert exc.value.violation.split(" ")[0] == "eval"
     assert exc.value.func_name == "inner"
     assert exc.value.path == ("calls_local_function_with_eval",)
 
