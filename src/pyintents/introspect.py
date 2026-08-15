@@ -141,38 +141,6 @@ def _format_target(node: ast.expr) -> tuple[str, bool]:
     return "<dynamic>", True
 
 
-# class ImportVisitor(ast.NodeVisitor):
-#     def __init__(self, protected_names: set[str]):
-#         self.protected_names = protected_names
-
-#         self.protected_short_names = {p.rsplit(".", 1)[-1] for p in protected_names}
-
-#     def visit_Import(self, node: ast.Import):
-#         for alias in node.names:
-#             name = alias.asname or alias.name
-#             if name in self.protected_short_names:
-#                 conflicts = [
-#                     p for p in self.protected_names if p.rsplit(".", 1)[-1] == name
-#                 ]
-#                 raise IntentShadowingError(
-#                     f"Forbidden import: '{alias.name}' imported as '{name}' "
-#                     f"shadows protected name(s): {', '.join(conflicts)}"
-#                 )
-
-#     def visit_ImportFrom(self, node: ast.ImportFrom):
-#         for alias in node.names:
-#             name = alias.asname or alias.name
-#             if name in self.protected_short_names:
-#                 conflicts = [
-#                     p for p in self.protected_names if p.rsplit(".", 1)[-1] == name
-#                 ]
-#                 source = f"{node.module}." if node.module else ""
-#                 raise IntentShadowingError(
-#                     f"Forbidden import: '{source}{alias.name}' imported as '{name}' "
-#                     f"shadows protected name(s): {', '.join(conflicts)}"
-#                 )
-
-
 class _OuterCallCollector(ast.NodeVisitor):
     def __init__(self, protected_names: set[str] | None = None) -> None:
         self.calls: list[CallLocation] = []
