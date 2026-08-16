@@ -18,6 +18,7 @@ from pyintents import (
     IntentViolationError,
     introspect,
 )
+from pyintents.exceptions import IntentShadowingError
 from pyintents.introspect import (
     CallLocation,
     SafeResolver,
@@ -1427,3 +1428,268 @@ def test_calltree_call_name_fallback_to_identity():
     tree = CallTree(cb, max_depth=0)
 
     assert tree.root.call_name == tree.root.identity
+
+
+# ---------------------------------------------------------------------------
+# Helpers for AST-based shadowing tests
+# ---------------------------------------------------------------------------
+
+
+def _parse_function_def(source: str) -> ast.FunctionDef:
+    node = ast.parse(textwrap.dedent(source)).body[0]
+    assert isinstance(node, ast.FunctionDef)
+    return node
+
+
+# ---------------------------------------------------------------------------
+# IntentShadowingError
+# ---------------------------------------------------------------------------
+
+
+def test_intent_shadowing_error_message():
+    err = IntentShadowingError("x")
+
+    assert str(err) == "Protected name shadowing error: x"
+
+    with pytest.raises(IntentError):
+        raise err
+
+
+# ---------------------------------------------------------------------------
+# Shadowing: assignments
+# ---------------------------------------------------------------------------
+
+
+def test_shadowing_name_assignment_is_forbidden():
+    func_def = _parse_function_def("""
+        def subject():
+            getcwd = 1
+            return getcwd
+        """)
+
+    with pytest.raises(
+        IntentShadowingError, match="Assignment to 'getcwd' is forbidden"
+    ):
+        extract_calls_from_function_def(func_def, protected_names={"os.getcwd"})
+
+
+def test_shadowing_tuple_assignment_is_forbidden():
+    func_def = _parse_function_def("""
+        def subject():
+            system, other = 1, 2
+            return system
+        """)
+
+    with pytest.raises(
+        IntentShadowingError, match="Assignment to 'system' is forbidden"
+    ):
+        extract_calls_from_function_def(func_def, protected_names={"os.system"})
+
+
+def test_shadowing_list_assignment_is_forbidden():
+    func_def = _parse_function_def("""
+        def subject():
+            [system, other] = 1, 2
+            return system
+        """)
+
+    with pytest.raises(
+        IntentShadowingError, match="Assignment to 'system' is forbidden"
+    ):
+        extract_calls_from_function_def(func_def, protected_names={"os.system"})
+
+
+def test_non_shadowing_assignment_targets_do_not_raise():
+    func_def = _parse_function_def("""
+        def subject():
+            x = 1
+            y, z = 2, 3
+            [a, b] = 4, 5
+            data = {}
+            data["k"] = 6
+            (data["k2"], c) = 7, 8
+            return x + y + z + a + b + c + data["k"] + data["k2"]
+        """)
+
+    calls, _ = extract_calls_from_function_def(func_def, protected_names={"os.getcwd"})
+
+    assert calls == []
+
+
+# ---------------------------------------------------------------------------
+# Shadowing: annotated and augmented assignments
+# ---------------------------------------------------------------------------
+
+
+def test_shadowing_annassign_is_forbidden():
+    func_def = _parse_function_def("""
+        def subject():
+            getcwd: int = 1
+            return getcwd
+        """)
+
+    with pytest.raises(
+        IntentShadowingError, match="Assignment to 'getcwd' is forbidden"
+    ):
+        extract_calls_from_function_def(func_def, protected_names={"os.getcwd"})
+
+
+def test_shadowing_augassign_is_forbidden():
+    func_def = _parse_function_def("""
+        def subject():
+            getcwd += 1
+        """)
+
+    with pytest.raises(
+        IntentShadowingError, match="Assignment to 'getcwd' is forbidden"
+    ):
+        extract_calls_from_function_def(func_def, protected_names={"os.getcwd"})
+
+
+def test_no_shadowing_annassign_and_augassign_generic_visit():
+    func_def = _parse_function_def("""
+        def subject():
+            x: int = 1
+            y = 0
+            y += 1
+            helper_allowed()
+            return x + y
+        """)
+
+    calls, _ = extract_calls_from_function_def(func_def, protected_names={"os.getcwd"})
+
+    assert [call.target for call in calls] == ["helper_allowed"]
+
+
+# ---------------------------------------------------------------------------
+# Shadowing: imports
+# ---------------------------------------------------------------------------
+
+
+def test_import_shadowing_is_forbidden():
+    func_def = _parse_function_def("""
+        def subject():
+            import os
+            return os
+        """)
+
+    with pytest.raises(
+        IntentShadowingError,
+        match="Forbidden import: 'os' imported as 'os'",
+    ):
+        extract_calls_from_function_def(func_def, protected_names={"os"})
+
+
+def test_import_alias_shadowing_is_forbidden():
+    func_def = _parse_function_def("""
+        def subject():
+            import os as system
+            return system
+        """)
+
+    with pytest.raises(
+        IntentShadowingError,
+        match="Forbidden import: 'os' imported as 'system'",
+    ):
+        extract_calls_from_function_def(func_def, protected_names={"os.system"})
+
+
+def test_import_without_shadowing_is_allowed():
+    func_def = _parse_function_def("""
+        def subject():
+            import os
+            return os
+        """)
+
+    calls, _ = extract_calls_from_function_def(
+        func_def, protected_names={"builtins.len"}
+    )
+
+    assert calls == []
+
+
+# ---------------------------------------------------------------------------
+# Shadowing: from-imports
+# ---------------------------------------------------------------------------
+
+
+def test_import_from_shadowing_is_forbidden():
+    func_def = _parse_function_def("""
+        def subject():
+            from os import getcwd
+            return getcwd
+        """)
+
+    with pytest.raises(
+        IntentShadowingError,
+        match="Forbidden import: 'os.getcwd' imported as 'getcwd'",
+    ):
+        extract_calls_from_function_def(func_def, protected_names={"os.getcwd"})
+
+
+def test_import_from_alias_shadowing_is_forbidden():
+    func_def = _parse_function_def("""
+        def subject():
+            from os import getcwd as cwd
+            return cwd
+        """)
+
+    with pytest.raises(
+        IntentShadowingError,
+        match="Forbidden import: 'os.getcwd' imported as 'cwd'",
+    ):
+        extract_calls_from_function_def(func_def, protected_names={"os.cwd"})
+
+
+def test_relative_import_from_shadowing_is_forbidden():
+    func_def = _parse_function_def("""
+        def subject():
+            from . import foo
+            return foo
+        """)
+
+    with pytest.raises(
+        IntentShadowingError,
+        match="Forbidden import: 'foo' imported as 'foo'",
+    ):
+        extract_calls_from_function_def(func_def, protected_names={"foo"})
+
+
+def test_import_from_without_shadowing_is_allowed():
+    func_def = _parse_function_def("""
+        def subject():
+            from os import getcwd
+            return getcwd
+        """)
+
+    calls, _ = extract_calls_from_function_def(
+        func_def, protected_names={"builtins.len"}
+    )
+
+    assert calls == []
+
+
+# ---------------------------------------------------------------------------
+# CallTree / IntentNamespace integration for protected names
+# ---------------------------------------------------------------------------
+
+
+def test_calltree_protected_names_propagate():
+    def subject():
+        getcwd = 1
+        return getcwd
+
+    with pytest.raises(IntentShadowingError):
+        CallTree(subject, max_depth=1, protected_names={"os.getcwd"})
+
+
+def test_intent_namespace_protects_allowed_names_from_shadowing():
+    ns = IntentNamespace(uses=["os.getcwd"])
+
+    @ns.intent()
+    def subject():
+        getcwd = 1
+        return getcwd
+
+    with pytest.raises(IntentShadowingError):
+        subject()
