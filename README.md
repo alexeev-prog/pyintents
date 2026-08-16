@@ -683,7 +683,6 @@ If `os.system` is forbidden or unknown, PyIntents blocks the root call to `func`
 ## Documentation
 
 - [Latest Documentation](https://alexeev-prog.github.io/pyintents/main)
-- [Version 0.2.2](https://alexeev-prog.github.io/pyintents/v0.2.2)
 - [GitHub Repository](https://github.com/alexeev-prog/pyintents)
 
 ---

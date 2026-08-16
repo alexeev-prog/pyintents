@@ -6,8 +6,8 @@ sys.path.insert(0, os.path.abspath("../src"))
 
 project = "pyintents"
 author = "alexeev-prog"
-version = "0.2.0"
-release = "0.2"
+version = "0.3.0"
+release = "0.3"
 project_copyright = f"{datetime.now().year}, Alexeev Bronislav"
 
 extensions = [
