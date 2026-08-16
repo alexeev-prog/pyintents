@@ -1,3 +1,12 @@
+## [0.3.0] - 2026-08-16
+
+### 🚀 Features
+
+- Add protection against shadowing (assign and imports)
+
+### 📚 Documentation
+
+- Update CHANGELOG.md for v0.2.0 [skip ci]
 ## [0.2.0] - 2026-08-04
 
 ### 🚀 Features
