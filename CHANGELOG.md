@@ -1,29 +1,15 @@
-## [Unreleased]
-
-### 🚀 Features
-
-- Add trusted capability dispatch with fixed grants, mandatory validators and bounded plain data
-- Add conservative strict syntax checks and call graph analysis budgets
-
-### 🐛 Bug Fixes
-
-- Resolve lexical bindings and actual function builtins instead of substituting globals
-- Detect local recursion and block aliases of denied dynamic primitives
-- Match function-object rules by identity without metadata fallback
-- Inspect actual code objects without following wrapped functions or calling arbitrary repr
-- Preserve coroutine wrappers and reject unsupported generator roots
-- Export IntentShadowingError and remove development tools from runtime dependencies
+## [0.4.0] - 2026-10-26
 
 ### 📚 Documentation
 
-- Clarify static-analysis limitations, trusted broker boundaries and lack of rollback
-- Add migration notes, dispatcher examples and harmless policy demonstrations
+- Update CHANGELOG.md for v0.3.0 [skip ci]
 
-### 🧪 Testing
+### 💼 Other
 
-- Add adversarial policy and dispatcher regression suites
-- Require 85% coverage in the test session
-
+- *(deps)* Bump mypy from 2.3.0 to 2.3.1
+- *(deps)* Bump pytest-mock from 3.15.1 to 3.16.0
+- *(deps)* Bump mypy from 2.3.1 to 2.4.0
+- *(deps)* Bump git-cliff from 2.13.1 to 2.14.2
 ## [0.3.0] - 2026-08-16
 
 ### 🚀 Features
@@ -43,10 +29,6 @@
 
 - Fix docs, examples and add article
 
-### 💼 Other
-
-- Fix typing errors
-
 ### 📚 Documentation
 
 - Update CHANGELOG.md for v0.1.0 [skip ci]
@@ -61,4 +43,8 @@
 ### 🧪 Testing
 
 - Create tests for 100% coverage
+
+### 💼 Other
+
+- Fix typing errors
 ## [0.1.0] - 2026-07-16
