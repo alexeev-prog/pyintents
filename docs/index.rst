@@ -1,13 +1,15 @@
 PyIntents documentation
 =======================
 
-Declarative capability-based access control for Python functions.
+Explicit capabilities and conservative call-policy analysis for Python.
 
 .. toctree::
    :maxdepth: 2
    :caption: Contents:
 
    modules
+   security
+   migration
 
 Indices and tables
 ==================

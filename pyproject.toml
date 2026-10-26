@@ -1,14 +1,16 @@
 [project]
 name = "pyintents"
 version = "0.3.0"
-description = "Add your description here"
+description = "Explicit capability dispatch and conservative call-policy analysis for Python"
 readme = "README.md"
 authors = [
     { name = "Alexeev Bronislav", email = "alexeev.dev@mail.ru" }
 ]
 requires-python = ">=3.12"
-dependencies = [
-    "asyncio>=4.0.0",
+dependencies = []
+
+[dependency-groups]
+dev = [
     "furo>=2025.12.19",
     "git-cliff>=2.13.1",
     "mutmut>=3.6.0",
@@ -20,13 +22,9 @@ dependencies = [
     "pytest-sugar>=1.1.1",
     "ruff>=0.15.21",
     "sphinx>=9.1.0",
+    "sphinx-polyversion>=2.0.0",
 ]
 
 [build-system]
 requires = ["uv_build>=0.11.28,<0.12.0"]
 build-backend = "uv_build"
-
-[dependency-groups]
-dev = [
-    "sphinx-polyversion>=2.0.0",
-]

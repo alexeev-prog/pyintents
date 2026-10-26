@@ -1,21 +1,26 @@
-import os
-from pyintents import IntentNamespace
+"""Parameter shadowing cannot substitute an allowed global function."""
 
-main_namespace = IntentNamespace(
-    uses=[print],
-    recursive=True,
-    usemodule=True,
-)
+from pyintents import IntentError, IntentNamespace
 
 
-@main_namespace.intent()
-def func() -> None:
-    print = os.system
-    print("echo Hello")
+def safe():
+    return "Allowed"
+
+
+def forbidden():
+    return "Not allowed"
+
+
+namespace = IntentNamespace(uses=[safe])
+
+
+@namespace.intent()
+def func(safe):
+    return safe()
 
 
 if __name__ == "__main__":
     try:
-        func()
-    except Exception as exc:
-        print(f"Error: {exc}")
+        func(forbidden)
+    except IntentError as exc:
+        print(f"Blocked: {exc}")

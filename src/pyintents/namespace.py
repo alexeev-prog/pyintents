@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import builtins
+import inspect
+import types
 import warnings
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from functools import wraps
-from typing import Any, TypeAlias
+from typing import Any, TypeAlias, cast
 
 from pyintents.exceptions import (
     IntentConfigurationError,
@@ -60,17 +63,16 @@ class RuleSet:
             short_names=self.short_names | other.short_names,
         )
 
-    def matches(self, node: CallNode) -> bool:
+    def matches(self, node: CallNode, *, unresolved: bool = False) -> bool:
         if node.resolved_func is not None:
-            try:
-                if node.resolved_func in self.objects:
-                    return True
-            except TypeError:
-                # Unhashable resolved callable; ignore object membership.
-                pass
+            if any(node.resolved_func is obj for obj in self.objects):
+                return True
 
             if get_function_identity(node.resolved_func) in self.identities:
                 return True
+
+        if (node.is_unresolved or node.is_dynamic) and not unresolved:
+            return False
 
         if node.identity in self.identities:
             return True
@@ -93,7 +95,7 @@ def _normalize_rules(
     short_names: set[str] = set()
 
     for rule in rules:
-        if isinstance(rule, str):
+        if type(rule) is str:
             rule_text = rule.strip()
 
             if not rule_text:
@@ -125,38 +127,18 @@ def _normalize_rules(
 
             continue
 
-        if not callable(rule):
-            raise IntentConfigurationError("Rule must be a callable or a string")
+        if type(rule) not in (
+            types.FunctionType,
+            types.BuiltinFunctionType,
+            types.MethodType,
+        ):
+            raise IntentConfigurationError(
+                "Rule must be a callable or a string; callable instances are unsupported"
+            )
 
-        try:
-            objects.add(rule)
-        except TypeError:
-            # Unhashable callable objects cannot be stored in a set.
-            pass
+        objects.add(cast(Callable[..., Any], rule))
 
-        identity = get_function_identity(rule)
-        identities.add(identity)
-
-        module = getattr(rule, "__module__", None)  # type: ignore
-        qualname = getattr(  # type: ignore
-            rule,
-            "__qualname__",
-            getattr(rule, "__name__", None),
-        )
-
-        if module and qualname:
-            dotted = f"{module}.{qualname}"
-            names.add(dotted)
-            identities.add(f"{module}:{qualname}")
-
-        if include_short_names:
-            name = getattr(rule, "__name__", None)
-
-            if not name and qualname:
-                name = qualname.rsplit(".", maxsplit=1)[-1]
-
-            if name:
-                short_names.add(name)
+        # An object rule means precisely this object, never a metadata fallback.
 
     return RuleSet(
         objects=frozenset(objects),
@@ -212,7 +194,16 @@ class IntentNamespace:
         allow_unknown: bool = False,
         deny_dynamic_primitives: bool = True,
         only_warnings: bool = False,
+        strict: bool = True,
+        max_nodes: int = 10_000,
+        analysis_depth: int = 100,
     ) -> None:
+        for name, value in (
+            ("max_nodes", max_nodes),
+            ("analysis_depth", analysis_depth),
+        ):
+            if type(value) is not int or value < 1:
+                raise IntentConfigurationError(f"{name} must be a positive integer")
         _validate_settings(
             recursive=recursive,
             usemodule=usemodule,
@@ -234,7 +225,13 @@ class IntentNamespace:
         if deny_dynamic_primitives:
             self._deny = self._deny.union(
                 _normalize_rules(
-                    DEFAULT_DENIED_DYNAMIC_PRIMITIVES,
+                    [
+                        *DEFAULT_DENIED_DYNAMIC_PRIMITIVES,
+                        *(
+                            getattr(builtins, name)
+                            for name in DEFAULT_DENIED_DYNAMIC_PRIMITIVES
+                        ),
+                    ],
                     include_short_names=True,
                 )
             )
@@ -244,6 +241,9 @@ class IntentNamespace:
         self._usemodule = usemodule
         self._allow_unknown = allow_unknown
         self._only_warnings = only_warnings
+        self._strict = strict
+        self._max_nodes = max_nodes
+        self._analysis_depth = analysis_depth
 
     def intent(
         self,
@@ -302,14 +302,23 @@ class IntentNamespace:
         def decorator(
             func: Callable[..., Any],
         ) -> Callable[..., Any]:
-            @wraps(func)
-            def wrapper(*args: Any, **kwargs: Any) -> Any:
+            if type(func) is not types.FunctionType:
+                raise IntentConfigurationError("intent requires a Python function")
+            if inspect.isgeneratorfunction(func) or inspect.isasyncgenfunction(func):
+                raise IntentConfigurationError("generator functions are not supported")
+
+            def validate() -> None:
                 protected_names: set[str] = set(
                     merged_uses.names | merged_uses.short_names
                 )
 
                 tree = CallTree(
-                    func, max_depth=max_depth, protected_names=protected_names
+                    func,
+                    max_depth=max_depth,
+                    protected_names=protected_names,
+                    strict=self._strict,
+                    max_nodes=self._max_nodes,
+                    analysis_depth=self._analysis_depth,
                 )
                 root_module = getattr(func, "__module__", None)
 
@@ -319,11 +328,34 @@ class IntentNamespace:
                     root_module=root_module,
                 )
 
+            if inspect.iscoroutinefunction(func):
+
+                @wraps(func)
+                async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
+                    validate()
+                    return await func(*args, **kwargs)
+
+                return async_wrapper
+
+            @wraps(func)
+            def wrapper(*args: Any, **kwargs: Any) -> Any:
+                validate()
                 return func(*args, **kwargs)
 
             return wrapper
 
         return decorator
+
+    def _violation(self, node: CallNode, path: tuple[str, ...]) -> None:
+        error = IntentViolationError(
+            func_name=path[-1],
+            violation=f"{node.call_name} (identity: {node.identity})",
+            path=path[:-1],
+        )
+        if self._only_warnings:
+            warnings.warn(f"Intent violation: {error}", stacklevel=3)
+        else:
+            raise error
 
     def _validate_tree(
         self,
@@ -338,38 +370,16 @@ class IntentNamespace:
             node, path = stack.pop()
 
             if path:
-                if policy.deny.matches(node):
-                    if self._only_warnings:
-                        warnings.warn(
-                            f"Intent violation: {node.call_name} "
-                            f"called from {'.'.join(path)}",
-                            stacklevel=2,
-                        )
-                    else:
-                        raise IntentViolationError(
-                            func_name=path[-1],
-                            violation=f"{node.call_name} (identity: {node.identity})",
-                            path=path[:-1],
-                        )
+                if policy.deny.matches(node, unresolved=True):
+                    self._violation(node, path)
 
-                if not policy.without.matches(node):
+                elif not policy.without.matches(node):
                     if not self._is_allowed(
                         node,
                         policy,
                         root_module=root_module,
                     ):
-                        if self._only_warnings:
-                            warnings.warn(
-                                f"Intent violation: {node.call_name} "
-                                f"called from {'.'.join(path)}",
-                                stacklevel=2,
-                            )
-                        else:
-                            raise IntentViolationError(
-                                func_name=path[-1],
-                                violation=f"{node.call_name} (identity: {node.identity})",
-                                path=path[:-1],
-                            )
+                        self._violation(node, path)
 
             for child in reversed(node.children):
                 stack.append((child, (*path, node.call_name)))

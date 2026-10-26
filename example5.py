@@ -1,23 +1,27 @@
-import os
-from pyintents import IntentNamespace
-import pprint
+"""Replacing an allowed global is rejected by object-identity rules."""
 
-main_namespace = IntentNamespace(
-    uses=[print],
-    recursive=True,
-    usemodule=True,
-)
-
-print = os.system
+from pyintents import IntentError, IntentNamespace
 
 
-@main_namespace.intent()
-def func() -> None:
-    print("echo Hello")
+def safe():
+    return "Allowed"
+
+
+def forbidden():
+    return "Not allowed"
+
+
+namespace = IntentNamespace(uses=[safe])
+
+
+@namespace.intent()
+def func():
+    return safe()
 
 
 if __name__ == "__main__":
+    safe = forbidden
     try:
         func()
-    except Exception as exc:
-        pprint.pprint(f"Error: {exc}")
+    except IntentError as exc:
+        print(f"Blocked: {exc}")

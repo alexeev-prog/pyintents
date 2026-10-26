@@ -7,6 +7,7 @@ __all__ = [
     "IntentViolationError",
     "IntentParseError",
     "IntentConfigurationError",
+    "IntentShadowingError",
 ]
 
 

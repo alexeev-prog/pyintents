@@ -1,25 +1,25 @@
-import os
+"""Recursive policy validation, using harmless denied functions."""
 
-from pyintents import IntentNamespace
+from pyintents import IntentError, IntentNamespace
 
-main_namespace = IntentNamespace(
-    uses=[print],
-    recursive=True,
-    usemodule=True,
-)
+main_namespace = IntentNamespace(uses=[print], usemodule=True, deny=["forbidden"])
 
 
-def inner() -> None:
-    os.system("rm test.txt")
+def forbidden():
+    return "This call must not run"
 
 
-def outer() -> None:
+def inner():
+    return forbidden()
+
+
+def outer():
     print("Outer")
     inner()
 
 
 @main_namespace.intent()
-def func() -> None:
+def func():
     print("Func")
     outer()
 
@@ -27,5 +27,5 @@ def func() -> None:
 if __name__ == "__main__":
     try:
         func()
-    except Exception as exc:
-        print(f"Error: {exc}")
+    except IntentError as exc:
+        print(f"Blocked before printing Func: {exc}")

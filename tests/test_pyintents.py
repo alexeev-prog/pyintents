@@ -217,10 +217,10 @@ def test_get_function_identity_callable_without_qualname():
     c.__qualname__ = None
     c.__name__ = "custom"
 
-    assert get_function_identity(c) == "<unknown>:custom"
+    assert get_function_identity(c) == "<unknown>:<callable>"
 
     c.__name__ = None
-    assert get_function_identity(c) == "<unknown>:None"
+    assert get_function_identity(c) == "<unknown>:<callable>"
 
 
 # ---------------------------------------------------------------------------
@@ -446,12 +446,12 @@ def test_get_function_ast_nested_target_second_walk(monkeypatch):
     target_func.__name__ = "target"
 
     def fake_source(_func):
-        return "if True:\n    def target():\n        pass\n"
+        return "if True:\n    def target_func():\n        pass\n"
 
     monkeypatch.setattr(introspect.inspect, "getsource", fake_source)
 
     node = _get_function_ast(target_func)
-    assert node.name == "target"
+    assert node.name == "target_func"
 
 
 def test_get_function_ast_target_name_none(monkeypatch):
@@ -467,8 +467,8 @@ def test_get_function_ast_target_name_none(monkeypatch):
 
     monkeypatch.setattr(introspect.inspect, "getsource", fake_source)
 
-    node = _get_function_ast(cb)
-    assert node.name == "anything"
+    with pytest.raises(IntentParseError):
+        _get_function_ast(cb)
 
 
 # ---------------------------------------------------------------------------
@@ -479,10 +479,10 @@ def test_get_function_ast_target_name_none(monkeypatch):
 def test_get_calls_returns_outer_calls_only():
     def subject():
         def inner():
-            inner_body()
+            inner_body()  # noqa: F821 - source-only fixture
 
         inner()
-        outer_body()
+        outer_body()  # noqa: F821 - source-only fixture
 
     assert set(get_calls(subject)) == {"inner", "outer_body"}
 
@@ -627,7 +627,7 @@ def test_calltree_unresolved_non_dynamic():
 
     assert child.call_name == "cb"
     assert child.is_unresolved is True
-    assert child.is_dynamic is False
+    assert child.is_dynamic is True
     assert child.is_source_available is False
 
 
@@ -672,7 +672,7 @@ def test_calltree_local_mutual_calls():
     assert b_node.is_local_definition is True
 
 
-def test_calltree_local_recursion_is_limited_by_depth_not_cycle():
+def test_calltree_local_recursion_detects_cycle():
     def local_rec():
         def rec():
             rec()
@@ -683,16 +683,11 @@ def test_calltree_local_recursion_is_limited_by_depth_not_cycle():
 
     rec1 = tree.root.children[0]
     rec2 = rec1.children[0]
-    rec3 = rec2.children[0]
 
     assert rec1.call_name == "rec"
     assert rec2.call_name == "rec"
-    assert rec3.call_name == "rec"
-    assert rec3.children == []
-
-    # In the current implementation local identities include owner_identity,
-    # so recursive local calls do not produce the same identity on descent.
-    assert not any(node.is_cycle for node in tree.root.walk())
+    assert rec2.children == []
+    assert rec2.is_cycle
 
 
 def test_calltree_global_recursion_cycle():
@@ -853,12 +848,13 @@ def test_normalize_rules_callable_normal():
     rs_false = _normalize_rules([sample], include_short_names=False)
 
     assert sample in rs_false.objects
-    assert get_function_identity(sample) in rs_false.identities
-    assert f"{sample.__module__}.{sample.__qualname__}" in rs_false.names
+    assert not rs_false.identities
+    assert not rs_false.names
     assert sample.__name__ not in rs_false.short_names
 
     rs_true = _normalize_rules([sample], include_short_names=True)
-    assert sample.__name__ in rs_true.short_names
+    assert sample in rs_true.objects
+    assert not rs_true.short_names
 
 
 def test_normalize_rules_callable_missing_module_or_qualname():
@@ -871,13 +867,8 @@ def test_normalize_rules_callable_missing_module_or_qualname():
     cb.__qualname__ = None
     cb.__name__ = None
 
-    rs = _normalize_rules([cb], include_short_names=True)
-    identity = get_function_identity(cb)
-
-    assert identity in rs.identities
-    assert cb in rs.objects
-    assert rs.names == frozenset()
-    assert rs.short_names == frozenset()
+    with pytest.raises(IntentConfigurationError):
+        _normalize_rules([cb], include_short_names=True)
 
 
 def test_normalize_rules_callable_no_name_but_qualname():
@@ -890,11 +881,8 @@ def test_normalize_rules_callable_no_name_but_qualname():
     cb.__qualname__ = "Foo.bar"
     cb.__name__ = None
 
-    rs = _normalize_rules([cb], include_short_names=True)
-
-    assert "m:Foo.bar" in rs.identities
-    assert "m.Foo.bar" in rs.names
-    assert "bar" in rs.short_names
+    with pytest.raises(IntentConfigurationError):
+        _normalize_rules([cb], include_short_names=True)
 
 
 def test_normalize_rules_callable_module_without_qualname():
@@ -907,11 +895,8 @@ def test_normalize_rules_callable_module_without_qualname():
     cb.__qualname__ = None
     cb.__name__ = "x"
 
-    rs = _normalize_rules([cb], include_short_names=True)
-
-    assert "m:x" in rs.identities
-    assert rs.names == frozenset()
-    assert "x" in rs.short_names
+    with pytest.raises(IntentConfigurationError):
+        _normalize_rules([cb], include_short_names=True)
 
 
 def test_normalize_rules_unhashable_callable():
@@ -926,12 +911,8 @@ def test_normalize_rules_unhashable_callable():
     cb.__qualname__ = "Foo.bar"
     cb.__name__ = None
 
-    rs = _normalize_rules([cb], include_short_names=True)
-
-    assert len(rs.objects) == 0
-    assert get_function_identity(cb) in rs.identities
-    assert "m.Foo.bar" in rs.names
-    assert "bar" in rs.short_names
+    with pytest.raises(IntentConfigurationError):
+        _normalize_rules([cb], include_short_names=True)
 
 
 # ---------------------------------------------------------------------------
@@ -1196,10 +1177,10 @@ def test_allow_unknown_allows_unresolved_local_variable_call():
 
 
 def test_allow_unknown_allows_dynamic_calls():
-    ns_allowed = IntentNamespace(allow_unknown=True)
+    ns_allowed = IntentNamespace(allow_unknown=True, strict=False)
     assert ns_allowed.intent()(calls_dynamic_expression)() == 1
 
-    ns_denied = IntentNamespace(allow_unknown=False)
+    ns_denied = IntentNamespace(allow_unknown=False, strict=False)
     with pytest.raises(IntentViolationError):
         ns_denied.intent()(calls_dynamic_expression)()
 
@@ -1427,7 +1408,7 @@ def test_calltree_call_name_fallback_to_identity():
     cb = NoNameCallable()
     tree = CallTree(cb, max_depth=0)
 
-    assert tree.root.call_name == tree.root.identity
+    assert tree.root.call_name == "<callable>"
 
 
 # ---------------------------------------------------------------------------

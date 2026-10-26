@@ -13,7 +13,7 @@ def test(session):
         "--cov=src/pyintents/",
         "--cov-report=xml",
         "--cov-report=term-missing",
-        "--cov-fail-under=0",
+        "--cov-fail-under=85",
         "-v",
         "-s",
         "--tb=short",
@@ -26,7 +26,7 @@ def test(session):
 def lint(session):
     """Run ruff linter."""
     session.run_always("uv", "sync", "--all-groups", external=True)
-    session.run("uv", "run", "ruff", "check", "src/pyintents/")
+    session.run("uv", "run", "ruff", "check", "src/pyintents/", "tests/")
 
 
 @nox.session(venv_backend="uv")

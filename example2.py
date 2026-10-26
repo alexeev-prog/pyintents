@@ -1,6 +1,6 @@
 """Example with safe local nested functions."""
 
-from pyintents import IntentNamespace, IntentViolationError
+from pyintents import IntentError, IntentNamespace
 
 namespace = IntentNamespace(
     uses=[print],
@@ -11,7 +11,7 @@ namespace = IntentNamespace(
 
 @namespace.intent()
 def ok_function() -> None:
-    def local_helper() -> None:
+    def local_helper():
         print("Local helper is allowed")
 
     local_helper()
@@ -19,10 +19,8 @@ def ok_function() -> None:
 
 @namespace.intent()
 def bad_function() -> None:
-    def local_helper() -> None:
-        import os
-
-        os.system("echo This should be blocked")
+    def local_helper():
+        return eval("1")
 
     local_helper()
 
@@ -32,5 +30,5 @@ if __name__ == "__main__":
 
     try:
         bad_function()
-    except IntentViolationError as exc:
+    except IntentError as exc:
         print(f"Blocked: {exc}")

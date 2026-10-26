@@ -36,11 +36,10 @@ napoleon_use_rtype = True
 
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),
-    "typing": ("https://docs.python.org/3/library/typing.html", None),
 }
 
 html_theme = "furo"
-html_static_path = ["_static"]
+html_static_path = []
 todo_include_todos = True
 
 autodoc_default_options = {

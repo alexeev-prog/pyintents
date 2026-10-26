@@ -1,7 +1,5 @@
 """Basic PyIntents example."""
 
-import os
-
 from pyintents import IntentNamespace, IntentViolationError
 
 namespace = IntentNamespace(
@@ -17,7 +15,11 @@ def safe_function() -> None:
 
 @namespace.intent()
 def unsafe_function() -> None:
-    os.system("echo This should be blocked")
+    other_function()
+
+
+def other_function():
+    return "Not allowed"
 
 
 if __name__ == "__main__":

@@ -1,3 +1,29 @@
+## [Unreleased]
+
+### 🚀 Features
+
+- Add trusted capability dispatch with fixed grants, mandatory validators and bounded plain data
+- Add conservative strict syntax checks and call graph analysis budgets
+
+### 🐛 Bug Fixes
+
+- Resolve lexical bindings and actual function builtins instead of substituting globals
+- Detect local recursion and block aliases of denied dynamic primitives
+- Match function-object rules by identity without metadata fallback
+- Inspect actual code objects without following wrapped functions or calling arbitrary repr
+- Preserve coroutine wrappers and reject unsupported generator roots
+- Export IntentShadowingError and remove development tools from runtime dependencies
+
+### 📚 Documentation
+
+- Clarify static-analysis limitations, trusted broker boundaries and lack of rollback
+- Add migration notes, dispatcher examples and harmless policy demonstrations
+
+### 🧪 Testing
+
+- Add adversarial policy and dispatcher regression suites
+- Require 85% coverage in the test session
+
 ## [0.3.0] - 2026-08-16
 
 ### 🚀 Features

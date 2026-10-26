@@ -1,21 +1,19 @@
-from pyintents import IntentNamespace
+"""Strict mode rejects imports instead of executing module initialization."""
 
-main_namespace = IntentNamespace(
-    uses=[print],
-    recursive=True,
-    usemodule=True,
-)
+from pyintents import IntentError, IntentNamespace
+
+namespace = IntentNamespace()
 
 
-@main_namespace.intent()
-def func() -> None:
-    from os import system as print
+@namespace.intent()
+def func():
+    import math
 
-    print("echo Hello")
+    return math.pi
 
 
 if __name__ == "__main__":
     try:
         func()
-    except Exception as exc:
-        print(f"Error: {exc}")
+    except IntentError as exc:
+        print(f"Blocked: {exc}")
