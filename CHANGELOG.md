@@ -2,6 +2,11 @@
 
 ### 📚 Documentation
 
+- Update CHANGELOG.md for v0.4.0 [skip ci]
+## [0.4.0] - 2026-10-26
+
+### 📚 Documentation
+
 - Update CHANGELOG.md for v0.3.0 [skip ci]
 
 ### 💼 Other
